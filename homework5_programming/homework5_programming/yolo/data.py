@@ -69,6 +69,44 @@ class CrackerBox(data.Dataset):
         filename_gt = self.gt_paths[idx]
         
         ### ADD YOUR CODE HERE ###
+        # image file: "%06d-box.txt" -> "%06d.jpg"
+        filename_image = filename_gt.replace('-box.txt', '.jpg')
+
+        # load the image (BGR, 480x640), resize to 448x448 and normalize
+        im = cv2.imread(filename_image)
+        im = cv2.resize(im, (self.yolo_image_size, self.yolo_image_size), interpolation=cv2.INTER_LINEAR)
+        im = (im.astype(np.float32) - self.pixel_mean) / 255.0
+        # (H, W, C) -> (C, H, W)
+        image_blob = torch.from_numpy(im.transpose((2, 0, 1))).float()
+
+        # load the ground truth box (x1, y1, x2, y2) and scale it to 448x448
+        x1, y1, x2, y2 = [float(v) for v in np.loadtxt(filename_gt).reshape(-1)[:4]]
+        x1 *= self.scale_width
+        x2 *= self.scale_width
+        y1 *= self.scale_height
+        y2 *= self.scale_height
+
+        # box center, width and height in the resized image
+        cx = 0.5 * (x1 + x2)
+        cy = 0.5 * (y1 + y2)
+        w = x2 - x1
+        h = y2 - y1
+
+        # grid cell responsible for this box
+        n = self.yolo_grid_num
+        col = min(max(int(cx // self.yolo_grid_size), 0), n - 1)
+        row = min(max(int(cy // self.yolo_grid_size), 0), n - 1)
+
+        # build the ground truth tensors
+        gt_box_blob = torch.zeros((5, n, n), dtype=torch.float32)
+        gt_mask_blob = torch.zeros((n, n), dtype=torch.float32)
+
+        gt_box_blob[0, row, col] = (cx - col * self.yolo_grid_size) / self.yolo_grid_size
+        gt_box_blob[1, row, col] = (cy - row * self.yolo_grid_size) / self.yolo_grid_size
+        gt_box_blob[2, row, col] = w / self.yolo_image_size
+        gt_box_blob[3, row, col] = h / self.yolo_image_size
+        gt_box_blob[4, row, col] = 1.0
+        gt_mask_blob[row, col] = 1.0
 
         # this is the sample dictionary to be returned from this function
         sample = {'image': image_blob,
